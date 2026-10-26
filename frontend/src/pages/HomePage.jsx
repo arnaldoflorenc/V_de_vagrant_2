@@ -42,7 +42,7 @@ function HomePage({ onLogin }) {
         type: 'success',
         message: `Bem-vindo(a), ${data.usuario.nome}!`,
       })
-      onLogin(data.usuario)
+      onLogin(data.usuario, data.token)
       setFormData({ ...formData, senha: '' })
     } catch (error) {
       setStatus({
@@ -103,32 +103,33 @@ function HomePage({ onLogin }) {
     <main className="login-page">
       <div className="login-shell">
         <section className="login-visual">
-          <div className="brand-pill">Kitchen App</div>
-          <h1>Peça suas comidas e bebidas em poucos passos.</h1>
+          <div className="brand-pill">Mini Container Runner</div>
+          <h1>Crie ambientes isolados e execute seus programas.</h1>
           <p>
-            Faça seu login ou cadastre-se para escolher o que deseja, acompanhar
-            seu pedido e receber tudo com rapidez e praticidade.
+            Faça login ou cadastre-se para criar ambientes com namespaces e
+            cgroups, definir CPU, memória e IO, e acompanhar a saída dos seus
+            programas.
           </p>
 
           <div className="feature-list">
             <div className="feature-item">
               <span className="feature-dot" />
-              <p>Menu completo da cozinha</p>
+              <p>Limites de CPU, memória e IO por ambiente</p>
             </div>
             <div className="feature-item">
               <span className="feature-dot" />
-              <p>Pedido em tempo real</p>
+              <p>Scripts salvos para reutilização</p>
             </div>
             <div className="feature-item">
               <span className="feature-dot" />
-              <p>Entrega e retirada mais rápida</p>
+              <p>Status e logs de cada execução</p>
             </div>
           </div>
         </section>
 
         <section className="login-card">
           <div className="card-header">
-            <span className="mini-badge">Cliente</span>
+            <span className="mini-badge">Acesso</span>
             <h2>{isRegister ? 'Cadastrar-se' : 'Entrar'}</h2>
           </div>
 
