@@ -1,18 +1,36 @@
-import HomePage from './pages/HomePage'
-import KitchenPage from './pages/KitchenPage'
+// Raiz da aplicação: sem token -> tela de login/cadastro; com token -> painel.
 import { useState } from 'react'
+import HomePage from './pages/HomePage'
+import DashboardPage from './pages/DashboardPage'
+
+function loadSession() {
+  try {
+    return JSON.parse(localStorage.getItem('usuario'))
+  } catch {
+    return null
+  }
+}
 
 function App() {
-  const [usuario, setUsuario] = useState(null)
+  const [usuario, setUsuario] = useState(loadSession)
 
-  if (usuario?.tipo === 'cozinha') {
-    return <KitchenPage usuario={usuario} onLogout={() => setUsuario(null)} />
+  const handleLogin = (user, token) => {
+    localStorage.setItem('usuario', JSON.stringify(user))
+    localStorage.setItem('token', token)
+    setUsuario(user)
   }
 
-  if( usuario?.tipo === 'cliente') {
-    return <PedidosPage usuario={usuario} onLogout={() => setUsuario(null)} />
+  const handleLogout = () => {
+    localStorage.removeItem('usuario')
+    localStorage.removeItem('token')
+    setUsuario(null)
   }
-  return <HomePage onLogin={setUsuario} />
+
+  if (usuario && localStorage.getItem('token')) {
+    return <DashboardPage usuario={usuario} onLogout={handleLogout} />
+  }
+
+  return <HomePage onLogin={handleLogin} />
 }
 
 export default App
