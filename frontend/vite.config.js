@@ -8,11 +8,11 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://10.1.1.2:3000',
+        target: 'http://10.1.1.2:4000',
         changeOrigin: true,
       },
       '/cozinha': {
-        target: 'http://10.1.1.2:3000',
+        target: 'http://10.1.1.2:4000',
         changeOrigin: true,
       },
     },

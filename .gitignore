@@ -1,2 +1,4 @@
 .vagrant/
 .env
+.runner.env
+runner.env

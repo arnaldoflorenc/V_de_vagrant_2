@@ -1,59 +1,80 @@
 Vagrant.configure("2") do |config|
-  is_arm = RUBY_PLATFORM.include?("arm64") || RUBY_PLATFORM.include?("aarch64")
-  box_name = is_arm ? "bento/ubuntu-22.04" : "ubuntu/focal64"
+  is_arm = RUBY_PLATFORM.include?("arm64") ||
+           RUBY_PLATFORM.include?("aarch64")
+
+  box_name = is_arm ? "bento/ubuntu-22.04" : "ubuntu/jammy64"
+  repo_url = "https://github.com/arnaldoflorenc/V_de_vagrant_2.git"
+  branch = "main"
 
   config.vm.boot_timeout = 600
+  config.vm.synced_folder ".", "/vagrant", disabled: true
 
   config.vm.provider "virtualbox" do |vb|
     vb.gui = false
-    vb.memory = "2048"
+    vb.memory = 2048
     vb.cpus = 1
-    
+
     vb.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
     vb.customize ["modifyvm", :id, "--nested-hw-virt", "off"]
   end
 
-  config.vm.define "frontend" do |frontend|
-    frontend.vm.box = box_name
-    frontend.vm.box_architecture = "arm64" if is_arm
-    frontend.vm.hostname = "frontend"
+  provision_code = <<-SHELL # Área de provisionamento comum a todas as vms apenas muda a especificidade daquilo que é necessário
+    set -e
 
-    frontend.vm.network "forwarded_port", guest: 5173, host: 5173, auto_correct: true
-    frontend.vm.network "private_network", ip: "10.1.1.10", virtualbox__intnet: "front_back"
+    REPO="/home/vagrant/work"
+    MARKER="/etc/vagrant_provisioned"
+    COMPONENT="COMPONENT_PLACEHOLDER"
 
-    # frontend.vm.synced_folder "../shared/frontend", "/home/vagrant/frontend", type: "virtualbox"
+    export DEBIAN_FRONTEND=noninteractive
 
-    frontend.vm.provision "shell", inline: <<-SHELL
-      set -e
-      
-      MARKER=/etc/vagrant_provisioned
+    apt-get update
+    apt-get install -y curl net-tools git
 
-      if [ ! -f "$MARKER" ]; then
-        sudo apt-get update
-        sudo apt-get install -y curl net-tools git
+    if [ ! -d "$REPO/.git" ]; then
+      rm -rf "$REPO"
+      git clone --filter=blob:none --no-checkout "#{repo_url}" "$REPO"
+      cd "$REPO"
+      git sparse-checkout init --cone
+      git sparse-checkout set "$COMPONENT"
+      git checkout "#{branch}"
+    else
+      cd "$REPO"
+      git fetch origin "#{branch}"
+      git reset --hard "origin/#{branch}"
+      git checkout -B "#{branch}" "origin/#{branch}"
+      git sparse-checkout set "$COMPONENT"
+    fi
+  SHELL
 
-        git clone --no-checkout https://github.com/arnaldoflorenc/V_de_vagrant_2.git /home/vagrant/work
-        cd /home/vagrant/work
-        git sparse-checkout set frontend
-        git checkout
-      else
-        echo "Já provisionado anteriormente, pulando clone/setup inicial."
-        cd /home/vagrant/work
-        git pull
-      fi
+  # front
+  config.vm.define "frontend" do |vm|
+    vm.vm.box = box_name
+    vm.vm.hostname = "frontend"
 
-      export DEBIAN_FRONTEND=noninteractive
+    vm.vm.network "forwarded_port",
+      guest: 5173, host: 5173, auto_correct: true
 
-      if ! command -v node &> /dev/null; then
-        curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-        sudo apt-get install -y nodejs build-essential
+    vm.vm.network "private_network",
+      ip: "10.1.1.10", virtualbox__intnet: "front_back"
+
+    vm.vm.provision "file",
+      source: "frontend/vite.config.js",
+      destination: "/tmp/vite.config.js"
+
+    script = provision_code.gsub("COMPONENT_PLACEHOLDER", "frontend")
+
+    script += <<-SHELL
+      if ! command -v node >/dev/null 2>&1; then
+        curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+        apt-get install -y nodejs build-essential
       fi
 
       cd /home/vagrant/work/frontend
+      install -o vagrant -g vagrant -m 644 /tmp/vite.config.js ./vite.config.js
       npm install
-      sudo chown -R vagrant:vagrant /home/vagrant/work/frontend
+      chown -R vagrant:vagrant /home/vagrant/work/frontend
 
-      cat <<'EOF' | sudo tee /etc/systemd/system/frontend.service
+      cat > /etc/systemd/system/frontend.service <<'EOF'
 [Unit]
 Description=React Frontend
 After=network.target
@@ -71,59 +92,56 @@ RestartSec=3
 WantedBy=multi-user.target
 EOF
 
-      sudo systemctl daemon-reload
-      sudo systemctl enable frontend
-      sudo systemctl restart frontend
-      sudo touch "$MARKER"
+      systemctl daemon-reload
+      systemctl enable frontend
+      systemctl restart frontend
+      touch "$MARKER"
     SHELL
+
+    vm.vm.provision "shell", inline: script
   end
 
-  config.vm.define "backend" do |backend|
-    backend.vm.box = box_name
-    backend.vm.box_architecture = "arm64" if is_arm
-    backend.vm.hostname = "backend"
+  # Back
+  config.vm.define "backend" do |vm|
+    vm.vm.box = box_name
+    vm.vm.hostname = "backend"
 
-    backend.vm.network "forwarded_port", guest: 3000, host: 3000, auto_correct: true
-    backend.vm.network "private_network", ip: "10.1.1.2", virtualbox__intnet: "front_back"
-    backend.vm.network "private_network", ip: "10.1.2.10", virtualbox__intnet: "back_db"
-    backend.vm.network "private_network", ip: "10.1.3.10", virtualbox__intnet: "back_runner"
+    vm.vm.network "forwarded_port",
+      guest: 4000, host: 4000, auto_correct: true
 
-    backend.vm.provision "file", source: ".env", destination: "/tmp/backend.env"
-    # backend.vm.synced_folder "../shared/backend", "/home/vagrant/backend", type: "virtualbox"
+    vm.vm.network "private_network",
+      ip: "10.1.1.2", virtualbox__intnet: "front_back"
 
-    backend.vm.provision "shell", inline: <<-SHELL
-      set -e
+    vm.vm.network "private_network",
+      ip: "10.1.2.10", virtualbox__intnet: "back_db"
 
-      MARKER=/etc/vagrant_provisioned
+    vm.vm.network "private_network",
+      ip: "10.1.3.10", virtualbox__intnet: "back_runner"
 
-      if [ ! -f "$MARKER" ]; then
-        sudo apt-get update
-        sudo apt-get install -y curl net-tools git
+    unless File.file?(".env")
+      raise "Arquivo .env não encontrado no diretório do Vagrant."
+    end
 
-        git clone --no-checkout https://github.com/arnaldoflorenc/V_de_vagrant_2.git /home/vagrant/work
-        cd /home/vagrant/work
-        git sparse-checkout set backend
-        git checkout
-      else
-        echo "Já provisionado anteriormente, pulando clone/setup inicial."
-        cd /home/vagrant/work
-        git pull
-      fi
+    vm.vm.provision "file",
+      source: ".env",
+      destination: "/tmp/backend.env"
 
-      export DEBIAN_FRONTEND=noninteractive
+    script = provision_code.gsub("COMPONENT_PLACEHOLDER", "backend")
 
-      if ! command -v node &> /dev/null; then
-        curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-        sudo apt-get install -y nodejs build-essential
+    script += <<-SHELL
+      if ! command -v node >/dev/null 2>&1; then
+        curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+        apt-get install -y nodejs build-essential
       fi
 
       cd /home/vagrant/work/backend
       npm install
-      sudo chown -R vagrant:vagrant /home/vagrant/work/backend
-      cp /tmp/backend.env /home/vagrant/work/backend/.env
-      sudo chown vagrant:vagrant /home/vagrant/work/backend/.env
 
-      cat <<'EOF' | sudo tee /etc/systemd/system/backend.service
+      cp /tmp/backend.env /home/vagrant/work/backend/.env
+      chown -R vagrant:vagrant /home/vagrant/work/backend
+      chmod 600 /home/vagrant/work/backend/.env
+
+      cat > /etc/systemd/system/backend.service <<'EOF'
 [Unit]
 Description=Node.js Backend
 After=network.target
@@ -141,79 +159,113 @@ RestartSec=3
 WantedBy=multi-user.target
 EOF
 
-      sudo systemctl daemon-reload
-      sudo systemctl enable backend
-      sudo systemctl restart backend
-      sudo touch "$MARKER"
+      systemctl daemon-reload
+      systemctl enable backend
+      systemctl restart backend
+      touch "$MARKER"
     SHELL
+
+    vm.vm.provision "shell", inline: script
   end
 
-  config.vm.define "db" do |db|
-    db.vm.box = box_name
-    db.vm.box_architecture = "arm64" if is_arm
-    db.vm.hostname = "db"
+  # DB
+  config.vm.define "db" do |vm|
+    vm.vm.box = box_name
+    vm.vm.hostname = "db"
 
-    db.vm.network "private_network", ip: "10.1.2.2", virtualbox__intnet: "back_db"
-    # db.vm.synced_folder "../shared/db", "/home/vagrant/db"
+    vm.vm.network "private_network",
+      ip: "10.1.2.2", virtualbox__intnet: "back_db"
 
-    db.vm.provision "shell", inline: <<-SHELL
-      set -e
+    script = provision_code.gsub("COMPONENT_PLACEHOLDER", "db")
 
-      MARKER=/etc/vagrant_provisioned
-
-      if [ ! -f "$MARKER" ]; then
-        sudo apt-get update
-        sudo apt-get install -y curl net-tools git
-
-        git clone --no-checkout https://github.com/arnaldoflorenc/V_de_vagrant_2.git /home/vagrant/work
-        cd /home/vagrant/work
-        git sparse-checkout set db
-        git checkout
-      else
-        echo "Já provisionado anteriormente, pulando clone/setup inicial."
-        cd /home/vagrant/work
-        git pull
+    script += <<-SHELL
+      if ! command -v mysql >/dev/null 2>&1; then
+        apt-get install -y mysql-server
       fi
 
-      export DEBIAN_FRONTEND=noninteractive
+      systemctl enable --now mysql
 
-      if ! command -v mysql &> /dev/null; then
-        sudo apt-get update
-        sudo apt-get install -y mysql-server
-      fi
+      sed -i 's/^bind-address.*/bind-address = 0.0.0.0/' \
+        /etc/mysql/mysql.conf.d/mysqld.cnf
 
-      sudo systemctl enable mysql
-      sudo systemctl start mysql
-
-      sudo sed -i 's/^bind-address.*/bind-address = 0.0.0.0/' /etc/mysql/mysql.conf.d/mysqld.cnf
-      sudo systemctl restart mysql
+      systemctl restart mysql
 
       if [ -f /home/vagrant/work/db/schema.sql ]; then
-        sudo mysql < /home/vagrant/work/db/schema.sql
+        mysql < /home/vagrant/work/db/schema.sql
       fi
-      sudo touch "$MARKER"
+
+      touch "$MARKER"
     SHELL
+
+    vm.vm.provision "shell", inline: script
   end
 
-  config.vm.define "runner" do |runner|
-    runner.vm.box = box_name
-    runner.vm.provider "virtualbox" do |vb|
-      vb.memory = "4096"
+  # Runner
+  config.vm.define "runner" do |vm|
+    vm.vm.box = box_name
+    vm.vm.hostname = "runner"
+
+    vm.vm.provider "virtualbox" do |vb|
+      vb.memory = 4096
       vb.cpus = 1
     end
-    runner.vm.box_architecture = "arm64" if is_arm
-    runner.vm.hostname = "runner"
 
-    runner.vm.network "private_network", ip: "10.1.3.20", virtualbox__intnet: "back_runner"
-    
-    runner.vm.provision "shell", inline: <<-SHELL
-      set -e
-      sudo apt-get update
-      sudo apt-get install -y docker.io
-      sudo systemctl enable --now docker
-      sudo mkdir -p /srv/runner/scripts /srv/runner/logs
-      SHELL
+    vm.vm.network "private_network",
+      ip: "10.1.3.20", virtualbox__intnet: "back_runner"
+
+    if File.file?("runner.env")
+      vm.vm.provision "file",
+        source: "runner.env",
+        destination: "/tmp/runner.env"
+    end
+
+    script = provision_code.gsub("COMPONENT_PLACEHOLDER", "runner")
+
+    script += <<-SHELL
+      if [ ! -f /tmp/runner.env ]; then
+        echo "Arquivo runner.env não encontrado; crie-o com RUNNER_TOKEN para provisionar o runner." >&2
+        exit 1
+      fi
+
+      if ! command -v node >/dev/null 2>&1; then
+        curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+        apt-get install -y nodejs
+      fi
+
+      if ! grep -Eq '^RUNNER_TOKEN=[^[:space:]#]+$' /tmp/runner.env; then
+        echo "Arquivo runner.env inválido: defina RUNNER_TOKEN sem espaços." >&2
+        exit 1
+      fi
+
+      install -d -m 755 /etc/runner
+      install -m 600 -o root -g root /tmp/runner.env /etc/runner/runner.env
+
+      mkdir -p /srv/runner/scripts /srv/runner/logs
+      chmod 755 /srv/runner/scripts /srv/runner/logs
+
+      cat > /etc/systemd/system/runner.service <<'EOF'
+[Unit]
+Description=Vagrant Runner Agent
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/vagrant/work/runner
+EnvironmentFile=/etc/runner/runner.env
+Environment=PORT=4000
+ExecStart=/usr/bin/node /home/vagrant/work/runner/agent.js
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+      systemctl daemon-reload
+      systemctl enable --now runner
+    SHELL
+
+    vm.vm.provision "shell", inline: script
   end
 end
-
-  
