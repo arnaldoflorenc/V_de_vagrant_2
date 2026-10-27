@@ -1,0 +1,159 @@
+.dashboard {
+  min-height: 100vh;
+  text-align: left;
+  color: var(--text-h);
+}
+
+.dashboard header {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.dashboard header h1 {
+  font-size: 20px;
+  margin: 0;
+}
+
+.dashboard nav {
+  display: flex;
+  gap: 8px;
+  flex: 1;
+}
+
+.dashboard .user {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.dashboard main {
+  padding: 24px;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.dashboard button {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text-h);
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.dashboard button.active {
+  background: var(--accent-bg);
+  border-color: var(--accent-border);
+}
+
+.dashboard button.danger {
+  color: #c0392b;
+  border-color: #c0392b;
+}
+
+.dashboard table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  margin-top: 16px;
+}
+
+.dashboard th,
+.dashboard td {
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+
+.dashboard .actions {
+  display: flex;
+  gap: 6px;
+}
+
+.badge {
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  color: #fff;
+  background: #7f8c8d;
+}
+
+.badge.em_execucao { background: #27ae60; }
+.badge.terminado { background: #2980b9; }
+.badge.erro { background: #c0392b; }
+
+.env-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 520px;
+}
+
+.env-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 14px;
+}
+
+.env-form input,
+.env-form select,
+.env-form textarea {
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+  font-family: var(--mono);
+  font-size: 14px;
+}
+
+.msg.error { color: #c0392b; }
+.msg.success { color: #27ae60; }
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal {
+  background: var(--bg);
+  border-radius: 8px;
+  padding: 16px;
+  width: min(800px, 92vw);
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  margin-top: 8px;
+  font-size: 14px;
+}
+
+.log-box {
+  background: #111;
+  color: #ddd;
+  padding: 12px;
+  border-radius: 6px;
+  height: 360px;
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: 13px;
+  white-space: pre-wrap;
+  margin: 8px 0;
+}
