@@ -1,9 +1,15 @@
 // Formulário de criação: nome, limites (CPU %, memória MB, IO MB/s) e o script
-// (salvo, enviado do computador ou digitado).
+// (salvo, enviado do computador ou digitado). No texto digitado escolhe-se a
+// linguagem (Bash ou Python); no script salvo vale o tipo com que ele foi guardado.
 import { useEffect, useState } from 'react'
 import { apiFetch } from '../services/api'
 
-const INITIAL = { nome: '', cpu: 50, memoria: 128, io: 10, origem: 'comando', script_id: '', comando: '' }
+const INITIAL = { nome: '', cpu: 50, memoria: 128, io: 10, origem: 'comando', tipo: 'bash', script_id: '', comando: '' }
+
+const PLACEHOLDER = {
+  bash: 'while true; do date; sleep 2; done',
+  python: 'import time\nwhile True:\n    print("ola do python", flush=True)\n    time.sleep(2)',
+}
 
 function NovoAmbientePanel({ onCreated }) {
   const [form, setForm] = useState(INITIAL)
@@ -29,6 +35,7 @@ function NovoAmbientePanel({ onCreated }) {
           cpu: Number(form.cpu),
           memoria: Number(form.memoria),
           io: Number(form.io),
+          tipo: form.origem === 'comando' ? form.tipo : undefined,
           script_id: form.origem === 'script' ? form.script_id : null,
           comando: form.origem === 'comando' ? form.comando : '',
         }),
@@ -75,15 +82,26 @@ function NovoAmbientePanel({ onCreated }) {
             <select name="script_id" value={form.script_id} onChange={change} required>
               <option value="">Selecione...</option>
               {scripts.map((s) => (
-                <option key={s.id} value={s.id}>{s.nome}</option>
+                <option key={s.id} value={s.id}>{s.nome} ({s.tipo})</option>
               ))}
             </select>
           </label>
         ) : (
-          <label>
-            Comandos (um ou mais programas, executados em bash)
-            <textarea name="comando" rows="5" value={form.comando} onChange={change} placeholder="while true; do date; sleep 2; done" required />
-          </label>
+          <>
+            <label>
+              Linguagem
+              <select name="tipo" value={form.tipo} onChange={change}>
+                <option value="bash">Bash</option>
+                <option value="python">Python 3</option>
+              </select>
+            </label>
+            <label>
+              {form.tipo === 'python'
+                ? 'Código Python (executado com python3)'
+                : 'Comandos (um ou mais programas, executados em bash)'}
+              <textarea name="comando" rows="5" value={form.comando} onChange={change} placeholder={PLACEHOLDER[form.tipo]} required />
+            </label>
+          </>
         )}
         {status.message && <p className={`msg ${status.type}`}>{status.message}</p>}
         <button type="submit" disabled={submitting}>{submitting ? 'Criando...' : 'Criar e executar'}</button>

@@ -3,13 +3,14 @@
 // como texto em um JSON único.
 // Consultas filtram por usuario_id
 const db = require("../config/database");
+const { TIPOS, TIPO_PADRAO } = require("../config/tipos");
 
 const MAX_SCRIPT_BYTES = 512 * 1024;
 
 const listScripts = async (req, res) => {
     try {
         const [scripts] = await db.query(
-            "SELECT id, nome, LENGTH(conteudo) AS tamanho, criado_em FROM scripts WHERE usuario_id = ? ORDER BY id DESC",
+            "SELECT id, nome, tipo, LENGTH(conteudo) AS tamanho, criado_em FROM scripts WHERE usuario_id = ? ORDER BY id DESC",
             [req.usuarioId]
         );
         res.json(scripts);
@@ -22,9 +23,13 @@ const listScripts = async (req, res) => {
 const createScript = async (req, res) => {
     const nome = String(req.body.nome || "").trim();
     const conteudo = req.body.conteudo;
+    const tipo = req.body.tipo === undefined || req.body.tipo === "" ? TIPO_PADRAO : String(req.body.tipo);
 
     if (!nome || typeof conteudo !== "string" || !conteudo.trim()) {
         return res.status(400).json({ error: "Nome e conteúdo do script são obrigatórios." });
+    }
+    if (!TIPOS.includes(tipo)) {
+        return res.status(400).json({ error: `Tipo inválido. Use: ${TIPOS.join(", ")}.` });
     }
     if (Buffer.byteLength(conteudo) > MAX_SCRIPT_BYTES) {
         return res.status(413).json({ error: "Script excede 512KB." });
@@ -32,10 +37,10 @@ const createScript = async (req, res) => {
 
     try {
         const [result] = await db.query(
-            "INSERT INTO scripts (usuario_id, nome, conteudo) VALUES (?, ?, ?)",
-            [req.usuarioId, nome.slice(0, 100), conteudo]
+            "INSERT INTO scripts (usuario_id, nome, tipo, conteudo) VALUES (?, ?, ?, ?)",
+            [req.usuarioId, nome.slice(0, 100), tipo, conteudo]
         );
-        res.status(201).json({ id: result.insertId, nome });
+        res.status(201).json({ id: result.insertId, nome, tipo });
     } catch (error) {
         console.error("Erro ao salvar script:", error);
         res.status(500).json({ error: "Erro ao salvar script." });

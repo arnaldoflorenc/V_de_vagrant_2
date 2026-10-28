@@ -4,10 +4,11 @@
 // Consultas filtram por usuario_id
 const db = require("../config/database");
 const runner = require("../services/runnerClient");
+const { EXTENSAO, TIPOS, TIPO_PADRAO } = require("../config/tipos");
 
 const FINAL = ["terminado", "erro"];
 const SELECT_AMBIENTE =
-    "SELECT a.id, a.nome, a.status, a.cpu_limit, a.memory_limit, a.io_limit, a.comando, a.script_id, a.criado_em, " +
+    "SELECT a.id, a.nome, a.tipo, a.status, a.cpu_limit, a.memory_limit, a.io_limit, a.comando, a.script_id, a.criado_em, " +
     "(SELECT resultado FROM execucoes e WHERE e.ambiente_id = a.id ORDER BY e.id DESC LIMIT 1) AS resultado " +
     "FROM ambiente a";
 
@@ -82,6 +83,7 @@ const getAmbiente = async (req, res) => {
 // Fluxo: valida -> grava no banco -> Runner inicia ambiente -> marca em_execucao.
 // Se o runner falhar, o ambiente apresenta um erro e motivo.
 // O conteúdo executado pode vir do script passado ou do campo de texto.
+// O tipo (bash/python) vem do script salvo; no campo de texto, do formulário.
 const createAmbiente = async (req, res) => {
     const nome = String(req.body.nome || "").trim();
     const cpu = toInt(req.body.cpu, 1, 100);
@@ -89,6 +91,7 @@ const createAmbiente = async (req, res) => {
     const io = toInt(req.body.io, 1, 1000);
     const comando = String(req.body.comando || "").trim();
     const scriptId = req.body.script_id ? Number(req.body.script_id) : null;
+    let tipo = req.body.tipo === undefined || req.body.tipo === "" ? TIPO_PADRAO : String(req.body.tipo);
 
     if (!nome || cpu === null || memoria === null || io === null) {
         return res.status(400).json({
@@ -99,36 +102,41 @@ const createAmbiente = async (req, res) => {
         return res.status(400).json({ error: "Informe um script salvo ou um comando/programa a executar." });
     }
 
+    if (!TIPOS.includes(tipo)) {
+        return res.status(400).json({ error: `Tipo inválido. Use: ${TIPOS.join(", ")}.` });
+    }
+
     let id;
     try {
         let conteudo = comando;
         if (scriptId) {
             const [scripts] = await db.query(
-                "SELECT conteudo FROM scripts WHERE id = ? AND usuario_id = ?",
+                "SELECT conteudo, tipo FROM scripts WHERE id = ? AND usuario_id = ?",
                 [scriptId, req.usuarioId]
             );
             if (scripts.length === 0) {
                 return res.status(404).json({ error: "Script não encontrado." });
             }
             conteudo = scripts[0].conteudo;
+            tipo = scripts[0].tipo;
         }
 
         const [result] = await db.query(
-            "INSERT INTO ambiente (usuario_id, script_id, nome, cpu_limit, memory_limit, io_limit, script_path, comando) " +
-            "VALUES (?, ?, ?, ?, ?, ?, '', ?)",
-            [req.usuarioId, scriptId, nome.slice(0, 100), cpu, memoria, io, scriptId ? null : comando]
+            "INSERT INTO ambiente (usuario_id, script_id, nome, tipo, cpu_limit, memory_limit, io_limit, script_path, comando) " +
+            "VALUES (?, ?, ?, ?, ?, ?, ?, '', ?)",
+            [req.usuarioId, scriptId, nome.slice(0, 100), tipo, cpu, memoria, io, scriptId ? null : comando]
         );
         id = result.insertId;
         await db.query(
             "UPDATE ambiente SET script_path = ? WHERE id = ?",
-            [`/srv/runner/scripts/env-${id}.sh`, id]
+            [`/srv/runner/scripts/env-${id}.${EXTENSAO[tipo]}`, id]
         );
         await db.query(
             "INSERT INTO execucoes (ambiente_id, status, iniciado_em) VALUES (?, 'pendente', NOW())",
             [id]
         );
 
-        await runner.createEnv({ id, cpu, memory: memoria, io, script: conteudo });
+        await runner.createEnv({ id, cpu, memory: memoria, io, script: conteudo, tipo });
         await updateStatus(id, "em_execucao", null);
 
         res.status(201).json(await findOwned(id, req.usuarioId));

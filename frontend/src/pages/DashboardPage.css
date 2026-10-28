@@ -86,6 +86,8 @@
 .badge.em_execucao { background: #27ae60; }
 .badge.terminado { background: #2980b9; }
 .badge.erro { background: #c0392b; }
+.badge.bash { background: #34495e; }
+.badge.python { background: #d68910; }
 
 .env-form {
   display: flex;

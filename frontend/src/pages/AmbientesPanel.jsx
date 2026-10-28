@@ -56,6 +56,7 @@ function AmbientesPanel() {
             <tr>
               <th>#</th>
               <th>Nome</th>
+              <th>Tipo</th>
               <th>Status</th>
               <th>CPU</th>
               <th>Memória</th>
@@ -69,6 +70,7 @@ function AmbientesPanel() {
               <tr key={a.id}>
                 <td>{a.id}</td>
                 <td>{a.nome}</td>
+                <td><span className={`badge ${a.tipo}`}>{a.tipo}</span></td>
                 <td><span className={`badge ${a.status}`}>{STATUS_LABEL[a.status]}</span></td>
                 <td>{a.cpu_limit}%</td>
                 <td>{a.memory_limit} MB</td>

@@ -3,7 +3,7 @@
 //
 // Cada ambiente = 1 cgroup (/sys/fs/cgroup/ambientes/env-<id>) que limita
 // CPU/memória/IO + 1 processo iniciado por "unshare" (PID, mount, UTS e IPC
-// próprios). É a versão "caseira" do que o Docker faz.
+// próprios). O script pode ser Bash ou Python 3 (campo "tipo"). É a versão "caseira" do que o Docker faz.
 // O backend fala com este serviço por HTTP (POST /envs, GET /envs/:id, ...),
 // sempre com o token compartilhado RUNNER_TOKEN.
 const http = require("http");
@@ -27,7 +27,13 @@ const MAX_LOG_CHUNK = 64 * 1024;
 const envs = new Map();
 const children = new Map();
 
-const scriptFile = (id) => path.join(SCRIPTS_DIR, `env-${id}.sh`);
+// Interpretadores permitidos. Só estes valores fixos entram no comando do shell
+// (nunca texto vindo do usuário). Python roda com -u (sem buffer) para o log
+// aparecer em tempo real, já que a saída vai para arquivo e não para um terminal.
+const INTERPRETERS = { bash: "/bin/bash", python: "/usr/bin/python3 -u" };
+const EXTENSIONS = { bash: "sh", python: "py" };
+
+const scriptFile = (id, tipo = "bash") => path.join(SCRIPTS_DIR, `env-${id}.${EXTENSIONS[tipo]}`);
 const logFile = (id) => path.join(LOGS_DIR, `env-${id}.log`);
 const cgroupPath = (id) => path.join(CGROUP_DIR, `env-${id}`);
 
@@ -140,25 +146,26 @@ const finish = (env, status, exitCode, reason) => {
 
 // stdout/stderr vão direto para o arquivo de log (o agent não segura a saída em
 // memória), então serviços de longa duração não crescem o consumo do agent.
-// O script do usuário é salvo em arquivo e executado por bash: nunca é
-// interpolado em um comando, o que evita injeção de shell.
-const startEnv = ({ id, cpu, memory, io, script, net }) => {
-    const env = { id, status: "em_execucao", pid: null, exitCode: null, reason: null, stopRequested: false, limits: { cpu, memory, io } };
+// O script do usuário é salvo em arquivo e executado pelo interpretador do seu
+// tipo (bash ou python3): nunca é interpolado em um comando, o que evita injeção de shell.
+const startEnv = ({ id, cpu, memory, io, script, net, tipo }) => {
+    const env = { id, tipo, status: "em_execucao", pid: null, exitCode: null, reason: null, stopRequested: false, limits: { cpu, memory, io } };
     const warnings = applyLimits(id, env.limits);
 
-    fs.writeFileSync(scriptFile(id), script.replace(/\r\n/g, "\n"), { mode: 0o700 });
+    const file = scriptFile(id, tipo);
+    fs.writeFileSync(file, script.replace(/\r\n/g, "\n"), { mode: 0o700 });
     const logFd = fs.openSync(logFile(id), "a");
     warnings.forEach((w) => fs.writeSync(logFd, `[runner] ${w}\n`));
 
     // O shell entra no cgroup antes do exec; descendentes herdam os limites.
     const unshareArgs = ["--pid", "--fork", "--mount-proc", "--uts", "--ipc"];
     if (net) unshareArgs.push("--net");
-    const inner = `hostname env-${id}; exec /bin/bash "$1"`;
+    const inner = `hostname env-${id}; exec ${INTERPRETERS[tipo]} "$1"`;
     const wrapper = `echo $$ > "$1/cgroup.procs"; shift; exec unshare "$@"`;
 
     const child = spawn(
         "/bin/sh",
-        ["-c", wrapper, "sh", cgroupPath(id), ...unshareArgs, "--", "/bin/sh", "-c", inner, "sh", scriptFile(id)],
+        ["-c", wrapper, "sh", cgroupPath(id), ...unshareArgs, "--", "/bin/sh", "-c", inner, "sh", file],
         { stdio: ["ignore", logFd, logFd], detached: true }
     );
     fs.closeSync(logFd);
@@ -273,12 +280,13 @@ const handle = async (req, res) => {
         if (req.method === "POST") {
             const body = await readBody(req);
             const { id, cpu, memory, io, script } = body;
+            const tipo = body.tipo === undefined ? "bash" : body.tipo;
             if (!Number.isInteger(id) || id < 1 || typeof script !== "string" || !script.trim()
-                || !validLimit(cpu, 1, 100) || !validLimit(memory, 16, 3072) || !validLimit(io, 1, 1000)) {
+                || !Object.hasOwn(INTERPRETERS, tipo) || !validLimit(cpu, 1, 100) || !validLimit(memory, 16, 3072) || !validLimit(io, 1, 1000)) {
                 return send(res, 400, { error: "Parâmetros inválidos" });
             }
             if (envs.has(id)) return send(res, 409, { error: "Ambiente já existe" });
-            return send(res, 201, publicEnv(startEnv({ ...body, net: body.net === true })));
+            return send(res, 201, publicEnv(startEnv({ ...body, tipo, net: body.net === true })));
         }
         return send(res, 405, { error: "Método não permitido" });
     }
@@ -300,7 +308,8 @@ const handle = async (req, res) => {
     if (!action && req.method === "DELETE") {
         await stopEnv(env);
         removeCgroup(id);
-        for (const file of [scriptFile(id), logFile(id)]) fs.rmSync(file, { force: true });
+        const files = [...Object.keys(EXTENSIONS).map((t) => scriptFile(id, t)), logFile(id)];
+        for (const file of files) fs.rmSync(file, { force: true });
         envs.delete(id);
         saveState();
         return send(res, 200, { message: "Removido" });

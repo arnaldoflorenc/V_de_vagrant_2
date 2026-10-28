@@ -232,6 +232,10 @@ EOF
         apt-get install -y nodejs
       fi
 
+      if ! command -v python3 >/dev/null 2>&1; then
+        apt-get install -y python3
+      fi
+
       if ! grep -Eq '^RUNNER_TOKEN=[^[:space:]#]+$' /tmp/runner.env; then
         echo "Arquivo runner.env inválido: defina RUNNER_TOKEN sem espaços." >&2
         exit 1
@@ -263,7 +267,8 @@ WantedBy=multi-user.target
 EOF
 
       systemctl daemon-reload
-      systemctl enable --now runner
+      systemctl enable runner
+      systemctl restart runner
     SHELL
 
     vm.vm.provision "shell", inline: script
