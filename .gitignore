@@ -2,3 +2,5 @@
 .env
 .runner.env
 runner.env
+
+node_modules/
