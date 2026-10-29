@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS scripts (
     id INT AUTO_INCREMENT PRIMARY KEY,
     usuario_id INT NOT NULL,
     nome VARCHAR(100) NOT NULL,
+    tipo ENUM('bash', 'python') NOT NULL DEFAULT 'bash',
     conteudo MEDIUMTEXT NOT NULL,
     criado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
@@ -31,6 +32,7 @@ CREATE TABLE IF NOT EXISTS ambiente (
     usuario_id INT NOT NULL,
     script_id INT NULL,
     nome VARCHAR(100) NOT NULL,
+    tipo ENUM('bash', 'python') NOT NULL DEFAULT 'bash',
     status ENUM('pendente', 'em_execucao', 'terminado', 'erro')
         NOT NULL DEFAULT 'pendente',
     cpu_limit VARCHAR(255) NOT NULL,
@@ -53,6 +55,23 @@ CREATE TABLE IF NOT EXISTS execucoes (
     finalizado_em TIMESTAMP NULL,
     FOREIGN KEY (ambiente_id) REFERENCES ambiente(id) ON DELETE CASCADE
 );
+
+-- Migração: bancos criados antes do suporte a Python não têm a coluna "tipo"
+-- (CREATE TABLE IF NOT EXISTS não altera tabelas existentes). O MySQL não tem
+-- "ADD COLUMN IF NOT EXISTS", então a existência é checada no information_schema.
+SET @sql := IF(
+    (SELECT COUNT(*) FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = 'vagrantdb' AND TABLE_NAME = 'scripts' AND COLUMN_NAME = 'tipo') = 0,
+    "ALTER TABLE scripts ADD COLUMN tipo ENUM('bash','python') NOT NULL DEFAULT 'bash' AFTER nome",
+    'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(
+    (SELECT COUNT(*) FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = 'vagrantdb' AND TABLE_NAME = 'ambiente' AND COLUMN_NAME = 'tipo') = 0,
+    "ALTER TABLE ambiente ADD COLUMN tipo ENUM('bash','python') NOT NULL DEFAULT 'bash' AFTER nome",
+    'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 CREATE USER IF NOT EXISTS 'app'@'10.1.2.10' IDENTIFIED BY 'senha'; 
 GRANT ALL PRIVILEGES ON vagrantdb.* TO 'app'@'10.1.2.10'; 
