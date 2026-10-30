@@ -20,7 +20,7 @@ echo "== 3. serviço infinito + CPU limitada a 20% (confira com top/systemd-cgto
 post /envs '{"id":9003,"cpu":20,"memory":64,"io":10,"script":"while true; do :; done"}'
 sleep 3; get /envs/9003
 echo "cpu.max: $(cat /sys/fs/cgroup/ambientes/env-9003/cpu.max)"
-echo "pid ns (deve diferir do host): $(sudo ls -l /proc/$(cat /sys/fs/cgroup/ambientes/env-9003/cgroup.procs | tail -1)/ns/pid)"
+echo "pid ns (deve diferir do host): $(sudo ls -l "/proc/$(tail -n 1 /sys/fs/cgroup/ambientes/env-9003/cgroup.procs)/ns/pid")"
 
 echo "== 4. estouro de memória (esperado: erro/OOM)"
 post /envs '{"id":9004,"cpu":50,"memory":32,"io":10,"script":"python3 -c \"x=bytearray(200*1024*1024); print(len(x))\""}'

@@ -1,0 +1,209 @@
+name: validation
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  detection:
+    runs-on: ubuntu-22.04
+    outputs:
+      backend: ${{ steps.f.outputs.backend }}
+      runner: ${{ steps.f.outputs.runner }}
+      frontend: ${{ steps.f.outputs.frontend }}
+      vagrant: ${{ steps.f.outputs.vagrant }}
+      tests: ${{ steps.f.outputs.tests }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: f
+        run: |
+          has() { [ -f "$2" ] && echo "$1=true" || echo "$1=false"; }
+          {
+            has backend backend/src/controllers/ambienteController.js
+            has runner runner/agent.js
+            has frontend frontend/src/pages/DashboardPage.jsx
+            has vagrant Vagrantfile
+            if [ -f tests/stress-test.mjs ] &&
+               [ -f tests/stress-test.test.mjs ] &&
+               [ -f tests/demo-environment.sh ]; then
+              echo "tests=true"
+            else
+              echo "tests=false"
+            fi
+          } | tee -a "$GITHUB_OUTPUT"
+  backend:
+    needs: detection
+    if: ${{ !cancelled() && needs.detection.outputs.backend == 'true' }}
+    runs-on: ubuntu-22.04
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -proot"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    env:
+      DB_HOST: 127.0.0.1
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: root
+      DB_NAME: vagrantdb
+      TOKEN_SECRET: segredo-de-teste
+      RUNNER_TOKEN: token-de-teste
+      PORT: 3000
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Schema aplica e é idempotente
+        run: |
+          mysql -h127.0.0.1 -uroot -proot < db/schema.sql
+          mysql -h127.0.0.1 -uroot -proot < db/schema.sql
+      - name: Dependências e sintaxe
+        working-directory: backend
+        run: |
+          npm ci
+          find src -name '*.js' -print0 | xargs -0 -n1 node --check
+      - name: API sobe, exige token e permite login
+        working-directory: backend
+        run: |
+          node src/server.js &
+          for i in $(seq 30); do curl -s localhost:3000/ >/dev/null && break; sleep 1; done
+          curl --fail --silent --show-error localhost:3000/ >/dev/null
+          test "$(curl -s -o /dev/null -w '%{http_code}' localhost:3000/api/ambientes)" = 401
+          curl -sf -X POST localhost:3000/api/register -H 'Content-Type: application/json' \
+            -d '{"nome":"CI","email":"ci@test.com","senha":"123456"}'
+          curl -sf -X POST localhost:3000/api/login -H 'Content-Type: application/json' \
+            -d '{"email":"ci@test.com","senha":"123456"}' | grep -q token
+  runner:
+    needs: [detection, backend]
+    if: ${{ !cancelled() && !failure() && needs.detection.outputs.runner == 'true' }}
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Sintaxe e shellcheck
+        run: |
+          node --check runner/agent.js
+          shellcheck runner/test.sh
+      - name: Agent sobe e recusa requisição sem token
+        run: |
+          sudo RUNNER_TOKEN=token-de-teste BIND=127.0.0.1 RUNNER_DIR=/tmp/runner \
+            "$(which node)" runner/agent.js &
+          for i in $(seq 15); do curl -s localhost:4000/envs >/dev/null && break; sleep 1; done
+          test "$(curl -s -o /dev/null -w '%{http_code}' localhost:4000/envs)" = 401
+          test "$(curl -s -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer token-de-teste' localhost:4000/envs)" = 200
+  frontend:
+    needs: [detection, runner]
+    if: ${{ !cancelled() && !failure() && needs.detection.outputs.frontend == 'true' }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+  vagrant:
+    needs: [detection, frontend]
+    if: ${{ !cancelled() && !failure() && needs.detection.outputs.vagrant == 'true' }}
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Instala o Vagrant
+        run: |
+          wget -qO- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp.gpg
+          echo "deb [signed-by=/usr/share/keyrings/hashicorp.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
+          sudo apt-get update -qq && sudo apt-get install -y -qq vagrant
+      - name: vagrant validate (com .env falso)
+        env:
+          VAGRANT_DEFAULT_PROVIDER: virtualbox
+        run: |
+          printf 'DB_HOST=x\nDB_PORT=3306\nDB_USER=x\nDB_PASSWORD=x\nDB_NAME=x\nTOKEN_SECRET=x\nRUNNER_TOKEN=x\n' > .env
+          vagrant validate
+  tests:
+    needs: [detection, vagrant]
+    if: ${{ !cancelled() && !failure() && needs.detection.outputs.tests == 'true' }}
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: |
+          shellcheck tests/demo-environment.sh
+          bash -n tests/demo-environment.sh
+          node --check tests/stress-test.mjs
+          node --check tests/stress-test.test.mjs
+          node --test tests/stress-test.test.mjs
+  E2E:
+    needs: [detection, backend, runner, frontend, vagrant, tests]
+    if: >-
+      ${{ !cancelled() && !failure()
+      && needs.detection.outputs.backend == 'true'
+      && needs.detection.outputs.runner == 'true'
+      && needs.detection.outputs.frontend == 'true'
+      && needs.detection.outputs.vagrant == 'true'
+      && needs.detection.outputs.tests == 'true' }}
+    runs-on: ubuntu-22.04
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -proot"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Banco
+        run: mysql -h127.0.0.1 -uroot -proot < db/schema.sql
+      - name: Runner agent (root)
+        run: |
+          sudo RUNNER_TOKEN=token-de-teste BIND=127.0.0.1 RUNNER_DIR=/srv/runner \
+            "$(which node)" runner/agent.js > /tmp/runner.log 2>&1 &
+          for i in $(seq 15); do curl -s localhost:4000/envs >/dev/null && break; sleep 1; done
+          test "$(curl -s -o /dev/null -w '%{http_code}' \
+            -H 'Authorization: Bearer token-de-teste' localhost:4000/envs)" = 200
+      - name: Backend
+        working-directory: backend
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_USER: root
+          DB_PASSWORD: root
+          DB_NAME: vagrantdb
+          TOKEN_SECRET: segredo-de-teste
+          RUNNER_URL: http://127.0.0.1:4000
+          RUNNER_TOKEN: token-de-teste
+          PORT: 3000
+        run: |
+          npm ci
+          node src/server.js > /tmp/backend.log 2>&1 &
+          for i in $(seq 30); do curl -s localhost:3000/ >/dev/null && break; sleep 1; done
+          curl --fail --silent --show-error localhost:3000/ >/dev/null
+      - name: Integração concorrente ponta a ponta (API e runner)
+        env:
+          BASE: http://localhost:3000/api
+        run: node tests/stress-test.mjs
+      - name: Logs em caso de falha
+        if: failure()
+        run: |
+          for log in /tmp/runner.log /tmp/backend.log; do
+            if [ -f "$log" ]; then
+              tail -n 50 "$log"
+            fi
+          done
